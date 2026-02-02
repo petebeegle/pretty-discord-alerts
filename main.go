@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -52,9 +53,14 @@ func main() {
 	router.HandleFunc("POST /webhook", middleware.RecoverMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		
+		// Read and log raw request body
+		bodyBytes, err := io.ReadAll(r.Body)
+		must(err, http.StatusBadRequest, "Failed to read request body")
+		log.Printf("Received webhook request body: %s", string(bodyBytes))
+		
 		// Decode payload
 		var payload grafana.WebhookPayload
-		must(json.NewDecoder(r.Body).Decode(&payload), http.StatusBadRequest, "Invalid request body")
+		must(json.Unmarshal(bodyBytes, &payload), http.StatusBadRequest, "Invalid request body")
 
 		// Record alert metrics
 		for _, alert := range payload.Alerts {
@@ -68,7 +74,7 @@ func main() {
 		// Transform and send to Discord
 		discordMsg := transformer.GrafanaToDiscord(&payload)
 		discordStart := time.Now()
-		err := webhook.Send(discordMsg)
+		err = webhook.Send(discordMsg)
 		metrics.RecordDiscordSend(err == nil, time.Since(discordStart))
 		must(err, http.StatusInternalServerError, "Failed to forward to Discord")
 
