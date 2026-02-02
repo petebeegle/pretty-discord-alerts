@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -26,9 +26,34 @@ func must(err error, status int, message string) {
 }
 
 func main() {
+	// Configure logging
+	logLevel := slog.LevelInfo
+	
+	// Support both DEBUG=true and LOG_LEVEL=debug/info/warn/error
+	if os.Getenv("DEBUG") == "true" {
+		logLevel = slog.LevelDebug
+	} else if level := os.Getenv("LOG_LEVEL"); level != "" {
+		switch level {
+		case "debug":
+			logLevel = slog.LevelDebug
+		case "info":
+			logLevel = slog.LevelInfo
+		case "warn":
+			logLevel = slog.LevelWarn
+		case "error":
+			logLevel = slog.LevelError
+		}
+	}
+	
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: logLevel,
+	}))
+	slog.SetDefault(logger)
+
 	discordWebhookURL := os.Getenv("DISCORD_WEBHOOK_URL")
 	if discordWebhookURL == "" {
-		log.Fatal("DISCORD_WEBHOOK_URL environment variable is required")
+		slog.Error("DISCORD_WEBHOOK_URL environment variable is required")
+		os.Exit(1)
 	}
 
 	port := os.Getenv("PORT")
@@ -53,10 +78,12 @@ func main() {
 	router.HandleFunc("POST /webhook", middleware.RecoverMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		
-		// Read and log raw request body
+		// Read raw request body
 		bodyBytes, err := io.ReadAll(r.Body)
 		must(err, http.StatusBadRequest, "Failed to read request body")
-		log.Printf("Received webhook request body: %s", string(bodyBytes))
+		
+		// Debug logging
+		slog.Debug("Received webhook request", "body", string(bodyBytes))
 		
 		// Decode payload
 		var payload grafana.WebhookPayload
@@ -82,15 +109,20 @@ func main() {
 
 		// Success
 		metrics.AlertsProcessedTotal.Inc()
-		log.Printf("Successfully forwarded %d alert(s), status: %s", len(payload.Alerts), payload.Status)
+		slog.Info("Successfully forwarded alerts",
+			"count", len(payload.Alerts),
+			"status", payload.Status,
+			"duration_ms", time.Since(start).Milliseconds(),
+		)
 		metrics.RecordHTTPRequest("/webhook", "POST", strconv.Itoa(http.StatusOK), time.Since(start))
 		metrics.RecordWebhookRequest("success")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("OK"))
 	}, "/webhook"))
 
-	log.Printf("Server starting on port %s", port)
+	slog.Info("Server starting", "port", port)
 	if err := http.ListenAndServe(fmt.Sprintf(":%s", port), router); err != nil {
-		log.Fatal(err)
+		slog.Error("Server failed", "error", err)
+		os.Exit(1)
 	}
 }

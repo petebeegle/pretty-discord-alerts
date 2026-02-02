@@ -16,6 +16,25 @@ Set the following environment variables:
 
 - `DISCORD_WEBHOOK_URL` (required) - Your Discord webhook URL
 - `PORT` (optional) - Server port (default: 8888 locally, 8080 in Docker)
+- `LOG_LEVEL` (optional) - Set log level: `debug`, `info`, `warn`, or `error` (default: `info`)
+- `DEBUG` (optional) - Legacy option, equivalent to `LOG_LEVEL=debug` (set to `true`)
+
+### Logging
+
+The service uses structured JSON logging with the following levels:
+- **INFO** (default): Success messages and important events
+- **DEBUG**: Verbose logging including raw webhook request bodies
+- **WARN**: Warning messages
+- **ERROR**: Error messages and panics
+
+Enable debug logging (either method works):
+```bash
+# Standard method
+LOG_LEVEL=debug go run main.go
+
+# Legacy method
+DEBUG=true go run main.go
+```
 
 ## Usage
 

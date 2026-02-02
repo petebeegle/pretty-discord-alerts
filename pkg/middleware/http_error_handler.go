@@ -2,7 +2,7 @@ package middleware
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -36,7 +36,7 @@ func RecoverMiddleware(next http.HandlerFunc, path string) http.HandlerFunc {
 				case *HTTPError:
 					status = e.Status
 					message = e.Message
-					log.Printf("HTTP %d on %s: %v", status, path, e)
+					slog.Error("HTTP error", "status", status, "path", path, "error", e)
 					if status >= 500 {
 						metricLabel = "discord_error"
 					} else {
@@ -46,12 +46,12 @@ func RecoverMiddleware(next http.HandlerFunc, path string) http.HandlerFunc {
 					status = http.StatusInternalServerError
 					message = "Internal server error"
 					metricLabel = "panic"
-					log.Printf("Panic on %s: %v", path, e)
+					slog.Error("Panic recovered", "path", path, "error", e)
 				default:
 					status = http.StatusInternalServerError
 					message = "Internal server error"
 					metricLabel = "panic"
-					log.Printf("Panic on %s: %v", path, rec)
+					slog.Error("Panic recovered", "path", path, "error", rec)
 				}
 
 				metrics.RecordHTTPRequest(path, r.Method, strconv.Itoa(status), time.Since(start))
