@@ -2,123 +2,87 @@ package transformer
 
 import (
 	"fmt"
-	"time"
+	"strings"
 
 	"github.com/pretty-discord-alerts/pkg/discord"
 	"github.com/pretty-discord-alerts/pkg/grafana"
 )
 
 const (
-	colorFiring   = 15158332 // Red
+	colorFiring   = 14037554 // Red (Grafana default)
 	colorWarning  = 16776960 // Yellow
 	colorResolved = 3066993  // Green
-	maxAlerts     = 10
 )
 
-// GrafanaToDiscord transforms a Grafana webhook payload to a Discord message
-func GrafanaToDiscord(payload *grafana.WebhookPayload) discord.Message {
-	var firingCount, resolvedCount int
-	var severity string
+// GrafanaToDiscord transforms a Grafana webhook payload to Discord messages (one per alert)
+func GrafanaToDiscord(payload *grafana.WebhookPayload) []discord.Message {
+	messages := make([]discord.Message, 0, len(payload.Alerts))
 
-	// Count alerts and determine severity
 	for _, alert := range payload.Alerts {
-		switch alert.Status {
-		case "firing":
-			firingCount++
-			if sev := alert.Labels["severity"]; sev == "critical" {
-				severity = "critical"
-			} else if sev == "warning" && severity != "critical" {
-				severity = "warning"
+		// Determine severity and color
+		severity := alert.Labels["severity"]
+		color := colorResolved
+		if alert.Status == "firing" {
+			if severity == "critical" {
+				color = colorFiring
+			} else {
+				color = colorWarning
 			}
-		case "resolved":
-			resolvedCount++
-		}
-	}
-
-	embed := discord.Embed{
-		Color:       getColor(firingCount, resolvedCount, severity),
-		Title:       getTitle(firingCount, resolvedCount, severity),
-		Description: getDescription(firingCount, resolvedCount),
-		Fields:      buildFields(payload.Alerts),
-		Footer: &discord.EmbedFooter{
-			Text:    "Grafana Alerts",
-			IconURL: "https://grafana.com/static/assets/img/fav32.png",
-		},
-		Timestamp: time.Now().Format(time.RFC3339),
-	}
-
-	return discord.Message{Embeds: []discord.Embed{embed}}
-}
-
-func getTitle(firingCount, resolvedCount int, severity string) string {
-	if firingCount > 0 {
-		if severity == "critical" {
-			return "🔥 Critical Alerts Firing"
-		}
-		return "⚠️ Warning Alerts Firing"
-	}
-	if resolvedCount > 0 {
-		return "✅ Alerts Resolved"
-	}
-	return "📊 Alert Status Update"
-}
-
-func getDescription(firingCount, resolvedCount int) string {
-	if firingCount > 0 && resolvedCount > 0 {
-		return fmt.Sprintf("%d alert(s) firing, %d alert(s) resolved", firingCount, resolvedCount)
-	}
-	if firingCount > 0 {
-		return fmt.Sprintf("%d alert(s) firing", firingCount)
-	}
-	if resolvedCount > 0 {
-		return fmt.Sprintf("%d alert(s) resolved", resolvedCount)
-	}
-	return "No alerts"
-}
-
-func getColor(firingCount, resolvedCount int, severity string) int {
-	if firingCount > 0 {
-		if severity == "critical" {
-			return colorFiring
-		}
-		return colorWarning
-	}
-	if resolvedCount > 0 {
-		return colorResolved
-	}
-	return colorWarning
-}
-
-func buildFields(alerts []grafana.Alert) []discord.EmbedField {
-	fields := make([]discord.EmbedField, 0, len(alerts))
-
-	for i, alert := range alerts {
-		if i >= maxAlerts {
-			fields = append(fields, discord.EmbedField{
-				Name:   "Additional Alerts",
-				Value:  fmt.Sprintf("... and %d more alert(s)", len(alerts)-maxAlerts),
-				Inline: false,
-			})
-			break
 		}
 
-		name := alert.Labels["alertname"]
-		if name == "" {
-			name = "Unknown Alert"
+		// Get alerting URL from external URL
+		alertingURL := payload.ExternalURL
+		if alertingURL != "" {
+			alertingURL = strings.TrimSuffix(alertingURL, "/") + "/alerting/list"
 		}
 
-		value := buildFieldValue(alert)
-		fields = append(fields, discord.EmbedField{
-			Name:   fmt.Sprintf("%d. %s", i+1, name),
-			Value:  value,
-			Inline: false,
+		// Build title
+		title := getAlertTitle(alert)
+
+		// Build field value
+		fieldValue := buildFieldValue(alert, payload.ExternalURL)
+
+		embed := discord.Embed{
+			Title:       title,
+			Description: "",
+			Type:        "rich",
+			URL:         alertingURL,
+			Color:       color,
+			Fields: []discord.EmbedField{
+				{
+					Name:   alert.Labels["alertname"],
+					Value:  fieldValue,
+					Inline: false,
+				},
+			},
+			Footer: &discord.EmbedFooter{
+				Text:    "Grafana v12.3.2",
+				IconURL: "https://grafana.com/static/assets/img/fav32.png",
+			},
+		}
+
+		messages = append(messages, discord.Message{
+			Username: "Grafana",
+			Embeds:   []discord.Embed{embed},
 		})
 	}
 
-	return fields
+	return messages
 }
 
-func buildFieldValue(alert grafana.Alert) string {
+func getAlertTitle(alert grafana.Alert) string {
+	severity := alert.Labels["severity"]
+	
+	if alert.Status == "firing" {
+		if severity == "critical" {
+			return "🔥 Critical Alert Firing"
+		}
+		return "⚠️ Warning Alert Firing"
+	}
+	return "✅ Alert Resolved"
+}
+
+func buildFieldValue(alert grafana.Alert, externalURL string) string {
 	var value string
 
 	if summary := alert.Annotations["summary"]; summary != "" {
@@ -126,6 +90,9 @@ func buildFieldValue(alert grafana.Alert) string {
 	}
 	if description := alert.Annotations["description"]; description != "" {
 		value += fmt.Sprintf("**Description:** %s\n", description)
+	}
+	if values := alert.Annotations["values"]; values != "" {
+		value += fmt.Sprintf("**Query Results:** %s\n", values)
 	}
 	if namespace := alert.Labels["namespace"]; namespace != "" {
 		value += fmt.Sprintf("**Namespace:** %s\n", namespace)
@@ -138,6 +105,38 @@ func buildFieldValue(alert grafana.Alert) string {
 		status = "Resolved"
 	}
 
-	value += fmt.Sprintf("**Status:** %s %s", emoji, status)
+	value += fmt.Sprintf("**Status:** %s %s\n", emoji, status)
+
+	// Add action links
+	var links []string
+	if alert.GeneratorURL != "" {
+		links = append(links, fmt.Sprintf("[View Source](%s)", alert.GeneratorURL))
+	}
+	if externalURL != "" {
+		silenceURL := buildSilenceURL(externalURL, alert.Labels)
+		links = append(links, fmt.Sprintf("[Silence](%s)", silenceURL))
+	}
+	
+	if len(links) > 0 {
+		value += "\n" + strings.Join(links, " • ")
+	}
+
 	return value
+}
+
+func buildSilenceURL(externalURL string, labels map[string]string) string {
+	baseURL := strings.TrimSuffix(externalURL, "/")
+	silenceURL := baseURL + "/alerting/silence/new?alertmanager=grafana"
+	
+	for key, value := range labels {
+		// URL encode the matcher
+		silenceURL += fmt.Sprintf("&matcher=%s%%3D%s", key, strings.ReplaceAll(value, " ", "+"))
+	}
+	
+	// Add orgId if present in external URL
+	if strings.Contains(externalURL, "orgId=") {
+		silenceURL += "&orgId=1"
+	}
+	
+	return silenceURL
 }

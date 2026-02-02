@@ -14,13 +14,16 @@ type Webhook struct {
 
 // Message represents a Discord message payload
 type Message struct {
-	Content string  `json:"content,omitempty"`
-	Embeds  []Embed `json:"embeds,omitempty"`
+	Username string  `json:"username,omitempty"`
+	Content  string  `json:"content,omitempty"`
+	Embeds   []Embed `json:"embeds,omitempty"`
 }
 
 // Embed represents a Discord embed
 type Embed struct {
 	Title       string       `json:"title,omitempty"`
+	Type        string       `json:"type,omitempty"`
+	URL         string       `json:"url,omitempty"`
 	Description string       `json:"description,omitempty"`
 	Color       int          `json:"color,omitempty"`
 	Fields      []EmbedField `json:"fields,omitempty"`

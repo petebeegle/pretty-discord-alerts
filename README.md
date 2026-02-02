@@ -77,32 +77,76 @@ Send a test Grafana webhook:
 curl -X POST http://localhost:8888/webhook \
   -H "Content-Type: application/json" \
   -d '{
+    "receiver": "discord",
     "status": "firing",
+    "externalURL": "https://monitoring.example.com",
     "alerts": [{
       "status": "firing",
       "labels": {
-        "alertname": "HighCPUUsage",
-        "severity": "critical",
-        "namespace": "production"
+        "alertname": "TestAlert",
+        "grafana_folder": "Test Folder",
+        "instance": "Grafana",
+        "severity": "critical"
       },
       "annotations": {
-        "summary": "CPU usage is above 90%",
-        "description": "The CPU usage has been above 90% for the last 5 minutes"
-      }
-    }]
+        "summary": "Notification test",
+        "values": "B=22, C=1"
+      },
+      "startsAt": "2026-02-02T12:00:00Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "https://monitoring.example.com/d/dashboard_uid?orgId=1",
+      "fingerprint": "abc123"
+    }],
+    "groupLabels": {},
+    "commonLabels": {
+      "alertname": "TestAlert"
+    },
+    "commonAnnotations": {
+      "summary": "Notification test"
+    }
   }'
 ```
 
 ## Discord Message Format
 
-The service transforms Grafana alerts into Discord embeds with:
+The service sends **one Discord message per alert** with:
 
-- **Title**: Emoji + alert status (🔥 Critical / ⚠️ Warning / ✅ Resolved)
-- **Description**: Count of firing/resolved alerts
-- **Fields**: Up to 10 alerts with details (summary, description, namespace, status)
-- **Color**: Red (critical), Yellow (warning), Green (resolved)
-- **Footer**: "Grafana Alerts" with Grafana icon
-- **Timestamp**: Current time
+- **Username**: "Grafana"
+- **Embed**:
+  - **Title**: Emoji-based titles (🔥 Critical Alert / ⚠️ Warning Alert / ✅ Alert Resolved)
+  - **Field**: Alert details including:
+    - Summary and description
+    - Query results (values from Grafana's alert evaluation)
+    - Namespace (if applicable)
+    - Status with emoji
+    - Quick action links (View Source, Silence)
+  - **Color**: Red for critical, Yellow for warning, Green for resolved
+  - **Type**: "rich"
+  - **URL**: Link to Grafana alerting list
+  - **Footer**: "Grafana v12.3.2" with Grafana icon
+
+### Example Discord Output
+
+For a critical firing alert, each Discord message will look like:
+
+**Username:** Grafana
+
+**Embed Title:** 🔥 Critical Alert Firing
+
+**Field - TestAlert:**
+```
+Summary: Notification test
+Query Results: B=22, C=1
+Status: 🔴 Firing
+
+[View Source](https://...) • [Silence](https://...)
+```
+
+**Footer:** Grafana v12.3.2
+
+> **Note**: 
+> - Each alert in the Grafana payload creates a separate Discord message
+> - "Query Results" shows the values from Grafana's alert evaluation queries (A, B, C, etc. are query labels in Grafana)
 
 ## Health Checks
 

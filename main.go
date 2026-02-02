@@ -72,15 +72,17 @@ func main() {
 		}
 
 		// Transform and send to Discord
-		discordMsg := transformer.GrafanaToDiscord(&payload)
-		discordStart := time.Now()
-		err = webhook.Send(discordMsg)
-		metrics.RecordDiscordSend(err == nil, time.Since(discordStart))
-		must(err, http.StatusInternalServerError, "Failed to forward to Discord")
+		discordMsgs := transformer.GrafanaToDiscord(&payload)
+		for _, discordMsg := range discordMsgs {
+			discordStart := time.Now()
+			err = webhook.Send(discordMsg)
+			metrics.RecordDiscordSend(err == nil, time.Since(discordStart))
+			must(err, http.StatusInternalServerError, "Failed to forward to Discord")
+		}
 
 		// Success
 		metrics.AlertsProcessedTotal.Inc()
-		log.Printf("Successfully forwarded alert: %d firing, status: %s", len(payload.Alerts), payload.Status)
+		log.Printf("Successfully forwarded %d alert(s), status: %s", len(payload.Alerts), payload.Status)
 		metrics.RecordHTTPRequest("/webhook", "POST", strconv.Itoa(http.StatusOK), time.Since(start))
 		metrics.RecordWebhookRequest("success")
 		w.WriteHeader(http.StatusOK)
