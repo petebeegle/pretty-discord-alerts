@@ -94,6 +94,72 @@ func TestGrafanaToDiscord(t *testing.T) {
 			wantColor: colorResolved,
 			wantCount: 1,
 		},
+		{
+			name: "notification severity firing",
+			payload: &grafana.WebhookPayload{
+				Status:      "firing",
+				ExternalURL: "https://monitoring.example.com",
+				Alerts: []grafana.Alert{
+					{
+						Status: "firing",
+						Labels: map[string]string{
+							"alertname": "Player Login",
+							"severity":  "notification",
+						},
+						Annotations: map[string]string{
+							"summary": "Player logged in",
+						},
+					},
+				},
+			},
+			wantTitle: "ℹ️ Notification",
+			wantColor: colorNotification,
+			wantCount: 1,
+		},
+		{
+			name: "notification severity resolved",
+			payload: &grafana.WebhookPayload{
+				Status:      "resolved",
+				ExternalURL: "https://monitoring.example.com",
+				Alerts: []grafana.Alert{
+					{
+						Status: "resolved",
+						Labels: map[string]string{
+							"alertname": "Player Login",
+							"severity":  "notification",
+						},
+						Annotations: map[string]string{
+							"summary": "Player logged out",
+						},
+					},
+				},
+			},
+			wantTitle: "ℹ️ Notification",
+			wantColor: colorNotification,
+			wantCount: 1,
+		},
+		{
+			name: "info severity",
+			payload: &grafana.WebhookPayload{
+				Status:      "firing",
+				ExternalURL: "https://monitoring.example.com",
+				Alerts: []grafana.Alert{
+					{
+						Status: "firing",
+						Labels: map[string]string{
+							"alertname": "Info Alert",
+							"severity":  "info",
+						},
+						Annotations: map[string]string{
+							"summary": "Info message",
+						},
+					},
+				},
+			},
+			wantTitle: "ℹ️ Notification",
+			wantColor: colorNotification,
+			wantCount: 1,
+		},
 	}
 
 	for _, tt := range tests {
@@ -176,6 +242,30 @@ func TestGetAlertTitle(t *testing.T) {
 			},
 			want: "✅ Alert Resolved",
 		},
+		{
+			name: "notification firing",
+			alert: grafana.Alert{
+				Status: "firing",
+				Labels: map[string]string{"severity": "notification"},
+			},
+			want: "ℹ️ Notification",
+		},
+		{
+			name: "notification resolved",
+			alert: grafana.Alert{
+				Status: "resolved",
+				Labels: map[string]string{"severity": "notification"},
+			},
+			want: "ℹ️ Notification",
+		},
+		{
+			name: "info severity",
+			alert: grafana.Alert{
+				Status: "firing",
+				Labels: map[string]string{"severity": "info"},
+			},
+			want: "ℹ️ Notification",
+		},
 	}
 
 	for _, tt := range tests {
@@ -189,30 +279,87 @@ func TestGetAlertTitle(t *testing.T) {
 }
 
 func TestBuildFieldValue(t *testing.T) {
-	alert := grafana.Alert{
-		Status: "firing",
-		Labels: map[string]string{
-			"namespace": "production",
+	tests := []struct {
+		name        string
+		alert       grafana.Alert
+		externalURL string
+		wantStrings []string
+		dontWant    []string
+	}{
+		{
+			name: "firing alert with all fields",
+			alert: grafana.Alert{
+				Status: "firing",
+				Labels: map[string]string{
+					"namespace": "production",
+					"severity":  "critical",
+				},
+				Annotations: map[string]string{
+					"summary":     "Test summary",
+					"description": "Test description",
+				},
+				GeneratorURL: "https://monitoring.example.com/d/dashboard",
+			},
+			externalURL: "https://monitoring.example.com",
+			wantStrings: []string{"Test summary", "Test description", "production", "🔴", "Firing", "View Source", "Silence"},
+			dontWant:    nil,
 		},
-		Annotations: map[string]string{
-			"summary":     "Test summary",
-			"description": "Test description",
+		{
+			name: "notification severity should not show status",
+			alert: grafana.Alert{
+				Status: "firing",
+				Labels: map[string]string{
+					"severity": "notification",
+				},
+				Annotations: map[string]string{
+					"summary": "Player logged in",
+				},
+				GeneratorURL: "https://monitoring.example.com/d/dashboard",
+			},
+			externalURL: "https://monitoring.example.com",
+			wantStrings: []string{"Player logged in", "View Source", "Silence"},
+			dontWant:    []string{"🔴", "Firing", "Status"},
 		},
-		GeneratorURL: "https://monitoring.example.com/d/dashboard",
+		{
+			name: "info severity should not show status",
+			alert: grafana.Alert{
+				Status: "resolved",
+				Labels: map[string]string{
+					"severity": "info",
+				},
+				Annotations: map[string]string{
+					"summary": "Info message",
+				},
+				GeneratorURL: "https://monitoring.example.com/d/dashboard",
+			},
+			externalURL: "https://monitoring.example.com",
+			wantStrings: []string{"Info message", "View Source", "Silence"},
+			dontWant:    []string{"✅", "Resolved", "Status"},
+		},
 	}
 
-	value := buildFieldValue(alert, "https://monitoring.example.com")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			value := buildFieldValue(tt.alert, tt.externalURL)
 
-	if value == "" {
-		t.Error("buildFieldValue() returned empty string")
-	}
+			if value == "" {
+				t.Error("buildFieldValue() returned empty string")
+			}
 
-	// Check that all fields are included
-	expected := []string{"Test summary", "Test description", "production", "🔴", "Firing", "View Source", "Silence"}
-	for _, exp := range expected {
-		if !contains(value, exp) {
-			t.Errorf("buildFieldValue() missing %q in output: %q", exp, value)
-		}
+			// Check that expected fields are included
+			for _, exp := range tt.wantStrings {
+				if !contains(value, exp) {
+					t.Errorf("buildFieldValue() missing %q in output: %q", exp, value)
+				}
+			}
+
+			// Check that unwanted fields are not included
+			for _, unwanted := range tt.dontWant {
+				if contains(value, unwanted) {
+					t.Errorf("buildFieldValue() should not contain %q in output: %q", unwanted, value)
+				}
+			}
+		})
 	}
 }
 

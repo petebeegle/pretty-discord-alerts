@@ -9,9 +9,10 @@ import (
 )
 
 const (
-	colorFiring   = 14037554 // Red (Grafana default)
-	colorWarning  = 16776960 // Yellow
-	colorResolved = 3066993  // Green
+	colorFiring      = 14037554 // Red (Grafana default)
+	colorWarning     = 16776960 // Yellow
+	colorResolved    = 3066993  // Green
+	colorNotification = 9807270  // Gray
 )
 
 // GrafanaToDiscord transforms a Grafana webhook payload to Discord messages (one per alert)
@@ -22,7 +23,11 @@ func GrafanaToDiscord(payload *grafana.WebhookPayload) []discord.Message {
 		// Determine severity and color
 		severity := alert.Labels["severity"]
 		color := colorResolved
-		if alert.Status == "firing" {
+		
+		// Notification/info severity always uses gray color
+		if severity == "notification" || severity == "info" {
+			color = colorNotification
+		} else if alert.Status == "firing" {
 			if severity == "critical" {
 				color = colorFiring
 			} else {
@@ -73,6 +78,11 @@ func GrafanaToDiscord(payload *grafana.WebhookPayload) []discord.Message {
 func getAlertTitle(alert grafana.Alert) string {
 	severity := alert.Labels["severity"]
 	
+	// Notification/info severity always shows info emoji regardless of status
+	if severity == "notification" || severity == "info" {
+		return "ℹ️ Notification"
+	}
+	
 	if alert.Status == "firing" {
 		if severity == "critical" {
 			return "🔥 Critical Alert Firing"
@@ -98,14 +108,17 @@ func buildFieldValue(alert grafana.Alert, externalURL string) string {
 		value += fmt.Sprintf("**Namespace:** %s\n", namespace)
 	}
 
-	emoji := "🔴"
-	status := "Firing"
-	if alert.Status == "resolved" {
-		emoji = "✅"
-		status = "Resolved"
+	// Don't show status for notification/info severity
+	severity := alert.Labels["severity"]
+	if severity != "notification" && severity != "info" {
+		emoji := "🔴"
+		status := "Firing"
+		if alert.Status == "resolved" {
+			emoji = "✅"
+			status = "Resolved"
+		}
+		value += fmt.Sprintf("**Status:** %s %s\n", emoji, status)
 	}
-
-	value += fmt.Sprintf("**Status:** %s %s\n", emoji, status)
 
 	// Add action links
 	var links []string
