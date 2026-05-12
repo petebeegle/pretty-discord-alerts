@@ -4,10 +4,10 @@ Pretty Discord Alerts - A Go service that transforms Grafana webhooks into beaut
 
 ## Features
 
-- 🎨 **Pretty Discord Embeds** - Transforms Grafana alerts into rich Discord embeds with colors, fields, and emojis
-- 🚦 **Severity-Based Colors** - Critical (red), Warning (yellow), Resolved (green)
-- 📊 **Alert Details** - Shows summary, description, namespace, and status for each alert
-- 🔢 **Smart Limits** - Displays up to 10 alerts per message to avoid Discord embed limits
+- 🎨 **Pretty Discord Embeds** - Transforms Grafana alerts into clean, Datadog-inspired Discord embeds
+- 🚦 **Severity-Based Colors** - Critical (red), Warning (orange/yellow), Resolved (green), Notification/Info (neutral gray-blue)
+- 📊 **Alert Details** - Shows summary, scope labels, values, status timing, and actions for each alert
+- 🔢 **Smart Limits** - Keeps field values within Discord embed limits
 - ✅ **Health Probes** - Built-in health and readiness endpoints for Kubernetes
 
 ## Configuration
@@ -132,17 +132,19 @@ The service sends **one Discord message per alert** with:
 
 - **Username**: "Grafana"
 - **Embed**:
-  - **Title**: Emoji-based titles (🔥 Critical Alert / ⚠️ Warning Alert / ✅ Alert Resolved)
-  - **Field**: Alert details including:
-    - Summary and description
-    - Query results (values from Grafana's alert evaluation)
-    - Namespace (if applicable)
-    - Status with emoji
-    - Quick action links (View Source, Silence)
-  - **Color**: Red for critical, Yellow for warning, Green for resolved
+  - **Title**: Datadog-inspired monitor status (`Critical monitor triggered`, `Warning monitor triggered`, `Monitor recovered`, or `Notification`)
+  - **Description**: Alert name from the `alertname` label
+  - **Fields**:
+    - `Summary` with summary and description annotations
+    - `Scope` with namespace, pod, instance, job, service, node, and component labels when present
+    - `Values` from Grafana's alert evaluation
+    - `Status` with firing/resolved state and start/end time when present
+    - `Actions` with Source and Silence links
+  - **Color**: Red for critical, orange/yellow for warning, green for resolved, neutral gray-blue for notification/info
   - **Type**: "rich"
   - **URL**: Link to Grafana alerting list
-  - **Footer**: "Grafana v12.3.2" with Grafana icon
+  - **Timestamp**: Alert start time for firing alerts, end time for resolved alerts
+  - **Footer**: "Grafana monitor" with Grafana icon
 
 ### Example Discord Output
 
@@ -150,18 +152,32 @@ For a critical firing alert, each Discord message will look like:
 
 **Username:** Grafana
 
-**Embed Title:** 🔥 Critical Alert Firing
+**Embed Title:** Critical monitor triggered
 
-**Field - TestAlert:**
+**Description:** TestAlert
+
+**Summary**
 ```
-Summary: Notification test
-Query Results: B=22, C=1
-Status: 🔴 Firing
-
-[View Source](https://...) • [Silence](https://...)
+Notification test
 ```
 
-**Footer:** Grafana v12.3.2
+**Values**
+```
+B=22, C=1
+```
+
+**Status**
+```
+Firing
+Started: 2026-02-02T12:00:00Z
+```
+
+**Actions**
+```
+[Source](https://...) • [Silence](https://...)
+```
+
+**Footer:** Grafana monitor
 
 > **Note**: 
 > - Each alert in the Grafana payload creates a separate Discord message
