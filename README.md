@@ -137,7 +137,7 @@ The service sends **one Discord message per alert** with:
   - **Fields**:
     - `Summary` with summary and description annotations
     - `Scope` with namespace, pod, instance, job, service, node, and component labels when present
-    - `Values` from Grafana's alert evaluation
+    - `Observed value` from Grafana evaluation ref `B` when present
     - `Status` with firing/resolved state and start/end time when present
     - `Actions` with Source and Silence links
   - **Color**: Red for critical, orange/yellow for warning, green for resolved, neutral gray-blue for notification/info
@@ -161,9 +161,9 @@ For a critical firing alert, each Discord message will look like:
 Notification test
 ```
 
-**Values**
+**Observed value**
 ```
-B=22, C=1
+22
 ```
 
 **Status**
@@ -181,7 +181,7 @@ Started: 2026-02-02T12:00:00Z
 
 > **Note**: 
 > - Each alert in the Grafana payload creates a separate Discord message
-> - "Query Results" shows the values from Grafana's alert evaluation queries (A, B, C, etc. are query labels in Grafana)
+> - "Observed value" shows Grafana evaluation ref `B` when present and omits threshold condition ref `C`
 
 ## Health Checks
 

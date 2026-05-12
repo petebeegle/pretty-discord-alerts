@@ -34,15 +34,16 @@ func TestGrafanaToDiscord(t *testing.T) {
 				Annotations: map[string]string{
 					"summary":     "CPU saturation is high",
 					"description": "api-0 has exceeded the alert threshold.",
-					"values":      "B=91.2, C=1",
 				},
+				Values:       map[string]float64{"B": 91.2, "C": 1},
+				ValueString:  "[ var='B' labels={} value=91.2 ], [ var='C' labels={} value=1 ]",
 				GeneratorURL: "https://monitoring.example.com/d/api",
 				StartsAt:     started,
 			},
 			wantTitle:     "Critical monitor triggered",
 			wantColor:     colorFiring,
 			wantTimestamp: started.Format(time.RFC3339),
-			wantFields:    []string{"Summary", "Scope", "Values", "Status", "Actions"},
+			wantFields:    []string{"Summary", "Scope", "Observed value", "Status", "Actions"},
 		},
 		{
 			name: "warning firing alert",
@@ -196,8 +197,9 @@ func TestBuildFieldsContent(t *testing.T) {
 		Annotations: map[string]string{
 			"summary":     "CPU saturation is high",
 			"description": "api-0 has exceeded the alert threshold.",
-			"values":      "B=91.2, C=1",
 		},
+		Values:       map[string]float64{"B": 91.2, "C": 1},
+		ValueString:  "[ var='B' labels={} value=91.2 ], [ var='C' labels={} value=1 ]",
 		GeneratorURL: "https://monitoring.example.com/d/api",
 		StartsAt:     started,
 	}
@@ -214,9 +216,12 @@ func TestBuildFieldsContent(t *testing.T) {
 		t.Fatalf("scope field = %#v", scope)
 	}
 
-	values := fieldByName(fields, "Values")
-	if values == nil || values.Value != "B=91.2, C=1" {
-		t.Fatalf("values field = %#v", values)
+	observed := fieldByName(fields, "Observed value")
+	if observed == nil || observed.Value != "91.2" {
+		t.Fatalf("observed value field = %#v", observed)
+	}
+	if strings.Contains(observed.Value, "C=") || strings.Contains(observed.Value, "C") {
+		t.Fatalf("observed value should not include threshold condition ref C: %#v", observed)
 	}
 
 	status := fieldByName(fields, "Status")
@@ -243,11 +248,63 @@ func TestBuildFieldsOmitMissingOptionalFields(t *testing.T) {
 	if fieldByName(fields, "Scope") != nil {
 		t.Fatal("scope field should be omitted")
 	}
-	if fieldByName(fields, "Values") != nil {
-		t.Fatal("values field should be omitted")
+	if fieldByName(fields, "Observed value") != nil {
+		t.Fatal("observed value field should be omitted")
 	}
 	if fieldByName(fields, "Actions") != nil {
 		t.Fatal("actions field should be omitted")
+	}
+}
+
+func TestBuildObservedValueFromAnnotationFallback(t *testing.T) {
+	fields := buildFields(grafana.Alert{
+		Status: "firing",
+		Labels: map[string]string{
+			"severity": "critical",
+		},
+		Annotations: map[string]string{
+			"summary": "CPU saturation is high",
+			"values":  "B=91.2, C=1",
+		},
+	}, "")
+
+	observed := fieldByName(fields, "Observed value")
+	if observed == nil || observed.Value != "91.2" {
+		t.Fatalf("observed value field = %#v", observed)
+	}
+}
+
+func TestBuildObservedValueOmitsConditionOnlyValues(t *testing.T) {
+	tests := []struct {
+		name  string
+		alert grafana.Alert
+	}{
+		{
+			name: "native C only",
+			alert: grafana.Alert{
+				Status:      "firing",
+				Labels:      map[string]string{"severity": "critical"},
+				Annotations: map[string]string{"summary": "Threshold condition only"},
+				Values:      map[string]float64{"C": 1},
+			},
+		},
+		{
+			name: "annotation C only",
+			alert: grafana.Alert{
+				Status:      "firing",
+				Labels:      map[string]string{"severity": "critical"},
+				Annotations: map[string]string{"summary": "Threshold condition only", "values": "C=1"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fields := buildFields(tt.alert, "")
+			if fieldByName(fields, "Observed value") != nil {
+				t.Fatalf("observed value field should be omitted: %#v", fields)
+			}
+		})
 	}
 }
 

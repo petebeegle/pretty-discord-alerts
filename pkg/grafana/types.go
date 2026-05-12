@@ -15,11 +15,13 @@ type WebhookPayload struct {
 
 // Alert represents an individual alert in the Grafana webhook
 type Alert struct {
-	Status       string            `json:"status"`
-	Labels       map[string]string `json:"labels"`
-	Annotations  map[string]string `json:"annotations"`
-	StartsAt     time.Time         `json:"startsAt"`
-	EndsAt       time.Time         `json:"endsAt"`
-	GeneratorURL string            `json:"generatorURL"`
-	Fingerprint  string            `json:"fingerprint"`
+	Status       string             `json:"status"`
+	Labels       map[string]string  `json:"labels"`
+	Annotations  map[string]string  `json:"annotations"`
+	Values       map[string]float64 `json:"values"`
+	ValueString  string             `json:"valueString"`
+	StartsAt     time.Time          `json:"startsAt"`
+	EndsAt       time.Time          `json:"endsAt"`
+	GeneratorURL string             `json:"generatorURL"`
+	Fingerprint  string             `json:"fingerprint"`
 }
