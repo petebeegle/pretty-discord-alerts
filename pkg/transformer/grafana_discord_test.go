@@ -1,377 +1,300 @@
 package transformer
 
 import (
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/pretty-discord-alerts/pkg/discord"
 	"github.com/pretty-discord-alerts/pkg/grafana"
 )
 
 func TestGrafanaToDiscord(t *testing.T) {
+	started := time.Date(2026, 2, 2, 12, 0, 0, 0, time.UTC)
+	ended := time.Date(2026, 2, 2, 12, 5, 0, 0, time.UTC)
+
 	tests := []struct {
-		name       string
-		payload    *grafana.WebhookPayload
-		wantTitle  string
-		wantColor  int
-		wantCount  int
+		name          string
+		alert         grafana.Alert
+		wantTitle     string
+		wantColor     int
+		wantTimestamp string
+		wantFields    []string
 	}{
 		{
-			name: "single firing alert",
-			payload: &grafana.WebhookPayload{
-				Status:      "firing",
-				ExternalURL: "https://monitoring.example.com",
-				Alerts: []grafana.Alert{
-					{
-						Status: "firing",
-						Labels: map[string]string{
-							"alertname":      "TestAlert",
-							"grafana_folder": "Test Folder",
-							"instance":       "Grafana",
-							"severity":       "critical",
-						},
-						Annotations: map[string]string{
-							"summary": "Notification test",
-							"values":  "B=22, C=1",
-						},
-						GeneratorURL: "https://monitoring.example.com/d/dashboard_uid",
-						StartsAt:     time.Now(),
-					},
-				},
-			},
-			wantTitle: "🔥 Critical Alert Firing",
-			wantColor: colorFiring,
-			wantCount: 1,
-		},
-		{
-			name: "multiple alerts",
-			payload: &grafana.WebhookPayload{
-				Status:      "firing",
-				ExternalURL: "https://monitoring.example.com",
-				Alerts: []grafana.Alert{
-					{
-						Status: "firing",
-						Labels: map[string]string{
-							"alertname": "Alert1",
-							"severity":  "critical",
-						},
-						Annotations: map[string]string{
-							"summary": "First alert",
-						},
-					},
-					{
-						Status: "firing",
-						Labels: map[string]string{
-							"alertname": "Alert2",
-							"severity":  "warning",
-						},
-						Annotations: map[string]string{
-							"summary": "Second alert",
-						},
-					},
-				},
-			},
-			wantCount: 2,
-		},
-		{
-			name: "resolved alert",
-			payload: &grafana.WebhookPayload{
-				Status:      "resolved",
-				ExternalURL: "https://monitoring.example.com",
-				Alerts: []grafana.Alert{
-					{
-						Status: "resolved",
-						Labels: map[string]string{
-							"alertname": "HighCPU",
-						},
-						Annotations: map[string]string{
-							"summary": "CPU is normal",
-						},
-						EndsAt: time.Now(),
-					},
-				},
-			},
-			wantTitle: "✅ Alert Resolved",
-			wantColor: colorResolved,
-			wantCount: 1,
-		},
-		{
-			name: "notification severity firing",
-			payload: &grafana.WebhookPayload{
-				Status:      "firing",
-				ExternalURL: "https://monitoring.example.com",
-				Alerts: []grafana.Alert{
-					{
-						Status: "firing",
-						Labels: map[string]string{
-							"alertname": "Player Login",
-							"severity":  "notification",
-						},
-						Annotations: map[string]string{
-							"summary": "Player logged in",
-						},
-					},
-				},
-			},
-			wantTitle: "ℹ️ Notification",
-			wantColor: colorNotification,
-			wantCount: 1,
-		},
-		{
-			name: "notification severity resolved",
-			payload: &grafana.WebhookPayload{
-				Status:      "resolved",
-				ExternalURL: "https://monitoring.example.com",
-				Alerts: []grafana.Alert{
-					{
-						Status: "resolved",
-						Labels: map[string]string{
-							"alertname": "Player Login",
-							"severity":  "notification",
-						},
-						Annotations: map[string]string{
-							"summary": "Player logged out",
-						},
-					},
-				},
-			},
-			wantTitle: "ℹ️ Notification",
-			wantColor: colorNotification,
-			wantCount: 1,
-		},
-		{
-			name: "info severity",
-			payload: &grafana.WebhookPayload{
-				Status:      "firing",
-				ExternalURL: "https://monitoring.example.com",
-				Alerts: []grafana.Alert{
-					{
-						Status: "firing",
-						Labels: map[string]string{
-							"alertname": "Info Alert",
-							"severity":  "info",
-						},
-						Annotations: map[string]string{
-							"summary": "Info message",
-						},
-					},
-				},
-			},
-			wantTitle: "ℹ️ Notification",
-			wantColor: colorNotification,
-			wantCount: 1,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			msgs := GrafanaToDiscord(tt.payload)
-
-			if len(msgs) != tt.wantCount {
-				t.Errorf("expected %d messages, got %d", tt.wantCount, len(msgs))
-				return
-			}
-
-			if tt.wantCount == 0 {
-				return
-			}
-
-			msg := msgs[0]
-
-			if msg.Username != "Grafana" {
-				t.Errorf("username = %q, want %q", msg.Username, "Grafana")
-			}
-
-			if len(msg.Embeds) != 1 {
-				t.Errorf("expected 1 embed, got %d", len(msg.Embeds))
-				return
-			}
-
-			embed := msg.Embeds[0]
-
-			if tt.wantTitle != "" && embed.Title != tt.wantTitle {
-				t.Errorf("title = %q, want %q", embed.Title, tt.wantTitle)
-			}
-
-			if tt.wantColor != 0 && embed.Color != tt.wantColor {
-				t.Errorf("color = %d, want %d", embed.Color, tt.wantColor)
-			}
-
-			if embed.Type != "rich" {
-				t.Errorf("type = %q, want %q", embed.Type, "rich")
-			}
-
-			if len(embed.Fields) != 1 {
-				t.Errorf("field count = %d, want 1", len(embed.Fields))
-			}
-
-			if embed.Footer == nil {
-				t.Error("footer is nil")
-			} else if embed.Footer.Text != "Grafana v12.3.2" {
-				t.Errorf("footer text = %q, want %q", embed.Footer.Text, "Grafana v12.3.2")
-			}
-		})
-	}
-}
-
-func TestGetAlertTitle(t *testing.T) {
-	tests := []struct {
-		name  string
-		alert grafana.Alert
-		want  string
-	}{
-		{
-			name: "critical firing",
-			alert: grafana.Alert{
-				Status: "firing",
-				Labels: map[string]string{"severity": "critical"},
-			},
-			want: "🔥 Critical Alert Firing",
-		},
-		{
-			name: "warning firing",
-			alert: grafana.Alert{
-				Status: "firing",
-				Labels: map[string]string{"severity": "warning"},
-			},
-			want: "⚠️ Warning Alert Firing",
-		},
-		{
-			name: "resolved",
-			alert: grafana.Alert{
-				Status: "resolved",
-			},
-			want: "✅ Alert Resolved",
-		},
-		{
-			name: "notification firing",
-			alert: grafana.Alert{
-				Status: "firing",
-				Labels: map[string]string{"severity": "notification"},
-			},
-			want: "ℹ️ Notification",
-		},
-		{
-			name: "notification resolved",
-			alert: grafana.Alert{
-				Status: "resolved",
-				Labels: map[string]string{"severity": "notification"},
-			},
-			want: "ℹ️ Notification",
-		},
-		{
-			name: "info severity",
-			alert: grafana.Alert{
-				Status: "firing",
-				Labels: map[string]string{"severity": "info"},
-			},
-			want: "ℹ️ Notification",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := getAlertTitle(tt.alert)
-			if got != tt.want {
-				t.Errorf("getAlertTitle() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestBuildFieldValue(t *testing.T) {
-	tests := []struct {
-		name        string
-		alert       grafana.Alert
-		externalURL string
-		wantStrings []string
-		dontWant    []string
-	}{
-		{
-			name: "firing alert with all fields",
+			name: "critical firing alert",
 			alert: grafana.Alert{
 				Status: "firing",
 				Labels: map[string]string{
+					"alertname": "HighCPU",
 					"namespace": "production",
+					"pod":       "api-0",
 					"severity":  "critical",
 				},
 				Annotations: map[string]string{
-					"summary":     "Test summary",
-					"description": "Test description",
+					"summary":     "CPU saturation is high",
+					"description": "api-0 has exceeded the alert threshold.",
+					"values":      "B=91.2, C=1",
 				},
-				GeneratorURL: "https://monitoring.example.com/d/dashboard",
+				GeneratorURL: "https://monitoring.example.com/d/api",
+				StartsAt:     started,
 			},
-			externalURL: "https://monitoring.example.com",
-			wantStrings: []string{"Test summary", "Test description", "production", "🔴", "Firing", "View Source", "Silence"},
-			dontWant:    nil,
+			wantTitle:     "Critical monitor triggered",
+			wantColor:     colorFiring,
+			wantTimestamp: started.Format(time.RFC3339),
+			wantFields:    []string{"Summary", "Scope", "Values", "Status", "Actions"},
 		},
 		{
-			name: "notification severity should not show status",
+			name: "warning firing alert",
 			alert: grafana.Alert{
 				Status: "firing",
 				Labels: map[string]string{
-					"severity": "notification",
+					"alertname": "DiskPressure",
+					"node":      "talos-1",
+					"severity":  "warning",
+				},
+				Annotations: map[string]string{
+					"summary": "Disk pressure is elevated",
+				},
+				StartsAt: started,
+			},
+			wantTitle:     "Warning monitor triggered",
+			wantColor:     colorWarning,
+			wantTimestamp: started.Format(time.RFC3339),
+			wantFields:    []string{"Summary", "Scope", "Status", "Actions"},
+		},
+		{
+			name: "resolved alert uses recovery title and end timestamp",
+			alert: grafana.Alert{
+				Status: "resolved",
+				Labels: map[string]string{
+					"alertname": "HighCPU",
+					"severity":  "critical",
+				},
+				Annotations: map[string]string{
+					"summary": "CPU saturation returned to normal",
+				},
+				StartsAt: started,
+				EndsAt:   ended,
+			},
+			wantTitle:     "Monitor recovered",
+			wantColor:     colorResolved,
+			wantTimestamp: ended.Format(time.RFC3339),
+			wantFields:    []string{"Summary", "Status", "Actions"},
+		},
+		{
+			name: "notification severity stays neutral",
+			alert: grafana.Alert{
+				Status: "firing",
+				Labels: map[string]string{
+					"alertname": "Player Login",
+					"severity":  "notification",
 				},
 				Annotations: map[string]string{
 					"summary": "Player logged in",
 				},
-				GeneratorURL: "https://monitoring.example.com/d/dashboard",
+				StartsAt: started,
 			},
-			externalURL: "https://monitoring.example.com",
-			wantStrings: []string{"Player logged in", "View Source", "Silence"},
-			dontWant:    []string{"🔴", "Firing", "Status"},
+			wantTitle:     "Notification",
+			wantColor:     colorNotification,
+			wantTimestamp: started.Format(time.RFC3339),
+			wantFields:    []string{"Summary", "Status", "Actions"},
 		},
 		{
-			name: "info severity should not show status",
+			name: "missing optional fields remains valid",
 			alert: grafana.Alert{
-				Status: "resolved",
-				Labels: map[string]string{
-					"severity": "info",
-				},
-				Annotations: map[string]string{
-					"summary": "Info message",
-				},
-				GeneratorURL: "https://monitoring.example.com/d/dashboard",
+				Status:      "firing",
+				Labels:      map[string]string{},
+				Annotations: map[string]string{},
 			},
-			externalURL: "https://monitoring.example.com",
-			wantStrings: []string{"Info message", "View Source", "Silence"},
-			dontWant:    []string{"✅", "Resolved", "Status"},
+			wantTitle:  "Warning monitor triggered",
+			wantColor:  colorWarning,
+			wantFields: []string{"Summary", "Status", "Actions"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			value := buildFieldValue(tt.alert, tt.externalURL)
+			msgs := GrafanaToDiscord(&grafana.WebhookPayload{
+				Status:      tt.alert.Status,
+				ExternalURL: "https://monitoring.example.com",
+				Alerts:      []grafana.Alert{tt.alert},
+			})
 
-			if value == "" {
-				t.Error("buildFieldValue() returned empty string")
+			if len(msgs) != 1 {
+				t.Fatalf("message count = %d, want 1", len(msgs))
 			}
 
-			// Check that expected fields are included
-			for _, exp := range tt.wantStrings {
-				if !contains(value, exp) {
-					t.Errorf("buildFieldValue() missing %q in output: %q", exp, value)
-				}
+			msg := msgs[0]
+			if msg.Username != "Grafana" {
+				t.Errorf("username = %q, want Grafana", msg.Username)
+			}
+			if len(msg.Embeds) != 1 {
+				t.Fatalf("embed count = %d, want 1", len(msg.Embeds))
 			}
 
-			// Check that unwanted fields are not included
-			for _, unwanted := range tt.dontWant {
-				if contains(value, unwanted) {
-					t.Errorf("buildFieldValue() should not contain %q in output: %q", unwanted, value)
+			embed := msg.Embeds[0]
+			if embed.Title != tt.wantTitle {
+				t.Errorf("title = %q, want %q", embed.Title, tt.wantTitle)
+			}
+			if embed.Color != tt.wantColor {
+				t.Errorf("color = %d, want %d", embed.Color, tt.wantColor)
+			}
+			if embed.Type != "rich" {
+				t.Errorf("type = %q, want rich", embed.Type)
+			}
+			if embed.Timestamp != tt.wantTimestamp {
+				t.Errorf("timestamp = %q, want %q", embed.Timestamp, tt.wantTimestamp)
+			}
+			if embed.Footer == nil || embed.Footer.Text != "Grafana monitor" {
+				t.Fatalf("footer = %#v, want Grafana monitor", embed.Footer)
+			}
+
+			for _, fieldName := range tt.wantFields {
+				if fieldByName(embed.Fields, fieldName) == nil {
+					t.Errorf("missing field %q in %#v", fieldName, embed.Fields)
 				}
 			}
 		})
 	}
 }
 
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && containsInString(s, substr))
+func TestGrafanaToDiscordMultipleAlerts(t *testing.T) {
+	msgs := GrafanaToDiscord(&grafana.WebhookPayload{
+		Status:      "firing",
+		ExternalURL: "https://monitoring.example.com",
+		Alerts: []grafana.Alert{
+			{
+				Status:      "firing",
+				Labels:      map[string]string{"alertname": "Alert1", "severity": "critical"},
+				Annotations: map[string]string{"summary": "First alert"},
+			},
+			{
+				Status:      "firing",
+				Labels:      map[string]string{"alertname": "Alert2", "severity": "warning"},
+				Annotations: map[string]string{"summary": "Second alert"},
+			},
+		},
+	})
+
+	if len(msgs) != 2 {
+		t.Fatalf("message count = %d, want 2", len(msgs))
+	}
 }
 
-func containsInString(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
+func TestBuildFieldsContent(t *testing.T) {
+	started := time.Date(2026, 2, 2, 12, 0, 0, 0, time.UTC)
+	alert := grafana.Alert{
+		Status: "firing",
+		Labels: map[string]string{
+			"alertname": "HighCPU",
+			"namespace": "production",
+			"pod":       "api-0",
+			"instance":  "10.0.0.1:9100",
+			"severity":  "critical",
+		},
+		Annotations: map[string]string{
+			"summary":     "CPU saturation is high",
+			"description": "api-0 has exceeded the alert threshold.",
+			"values":      "B=91.2, C=1",
+		},
+		GeneratorURL: "https://monitoring.example.com/d/api",
+		StartsAt:     started,
+	}
+
+	fields := buildFields(alert, "https://monitoring.example.com")
+
+	summary := fieldByName(fields, "Summary")
+	if summary == nil || !strings.Contains(summary.Value, "CPU saturation is high") || !strings.Contains(summary.Value, "api-0 has exceeded") {
+		t.Fatalf("summary field = %#v", summary)
+	}
+
+	scope := fieldByName(fields, "Scope")
+	if scope == nil || !strings.Contains(scope.Value, "`namespace:production`") || !strings.Contains(scope.Value, "`pod:api-0`") || !strings.Contains(scope.Value, "`instance:10.0.0.1:9100`") {
+		t.Fatalf("scope field = %#v", scope)
+	}
+
+	values := fieldByName(fields, "Values")
+	if values == nil || values.Value != "B=91.2, C=1" {
+		t.Fatalf("values field = %#v", values)
+	}
+
+	status := fieldByName(fields, "Status")
+	if status == nil || !strings.Contains(status.Value, "Firing") || !strings.Contains(status.Value, started.Format(time.RFC3339)) {
+		t.Fatalf("status field = %#v", status)
+	}
+
+	actions := fieldByName(fields, "Actions")
+	if actions == nil || !strings.Contains(actions.Value, "[Source]") || !strings.Contains(actions.Value, "[Silence]") {
+		t.Fatalf("actions field = %#v", actions)
+	}
+}
+
+func TestBuildFieldsOmitMissingOptionalFields(t *testing.T) {
+	fields := buildFields(grafana.Alert{
+		Status:      "firing",
+		Labels:      map[string]string{"severity": "warning"},
+		Annotations: map[string]string{},
+	}, "")
+
+	if fieldByName(fields, "Summary") == nil {
+		t.Fatal("missing summary field")
+	}
+	if fieldByName(fields, "Scope") != nil {
+		t.Fatal("scope field should be omitted")
+	}
+	if fieldByName(fields, "Values") != nil {
+		t.Fatal("values field should be omitted")
+	}
+	if fieldByName(fields, "Actions") != nil {
+		t.Fatal("actions field should be omitted")
+	}
+}
+
+func TestBuildSilenceURL(t *testing.T) {
+	got := buildSilenceURL("https://monitoring.example.com", map[string]string{
+		"alertname": "High CPU",
+		"namespace": "production",
+	})
+
+	for _, want := range []string{
+		"https://monitoring.example.com/alerting/silence/new?",
+		"alertmanager=grafana",
+		"matcher=alertname%3DHigh+CPU",
+		"matcher=namespace%3Dproduction",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("buildSilenceURL() = %q, missing %q", got, want)
 		}
 	}
-	return false
+}
+
+func TestDiscordFieldValuesStayWithinLimit(t *testing.T) {
+	longSummary := strings.Repeat("a", maxFieldValueLength+50)
+
+	fields := buildFields(grafana.Alert{
+		Status: "firing",
+		Labels: map[string]string{
+			"severity": "critical",
+		},
+		Annotations: map[string]string{
+			"summary": longSummary,
+		},
+	}, "")
+
+	for _, field := range fields {
+		if len(field.Value) > maxFieldValueLength {
+			t.Fatalf("field %q length = %d, want <= %d", field.Name, len(field.Value), maxFieldValueLength)
+		}
+	}
+}
+
+func fieldByName(fields []discord.EmbedField, name string) *discord.EmbedField {
+	for i := range fields {
+		if fields[i].Name == name {
+			return &fields[i]
+		}
+	}
+
+	return nil
 }
