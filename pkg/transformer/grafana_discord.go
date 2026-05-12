@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -115,9 +116,9 @@ func buildFields(alert grafana.Alert, externalURL string) []discord.EmbedField {
 		})
 	}
 
-	if values := strings.TrimSpace(alert.Annotations["values"]); values != "" {
+	if values := buildObservedValue(alert); values != "" {
 		fields = append(fields, discord.EmbedField{
-			Name:   "Values",
+			Name:   "Observed value",
 			Value:  truncateFieldValue(values),
 			Inline: false,
 		})
@@ -167,6 +168,31 @@ func buildScope(alert grafana.Alert) string {
 	}
 
 	return strings.Join(labels, " ")
+}
+
+func buildObservedValue(alert grafana.Alert) string {
+	if value, ok := alert.Values["B"]; ok {
+		return formatFloat(value)
+	}
+
+	return parseObservedValueAnnotation(alert.Annotations["values"])
+}
+
+func parseObservedValueAnnotation(value string) string {
+	for _, part := range strings.Split(value, ",") {
+		key, val, ok := strings.Cut(strings.TrimSpace(part), "=")
+		if !ok || strings.TrimSpace(key) != "B" {
+			continue
+		}
+
+		return strings.TrimSpace(val)
+	}
+
+	return ""
+}
+
+func formatFloat(value float64) string {
+	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
 func buildStatus(alert grafana.Alert) string {
