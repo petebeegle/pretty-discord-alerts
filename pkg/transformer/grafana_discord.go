@@ -3,6 +3,7 @@ package transformer
 import (
 	"fmt"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,6 +23,7 @@ const (
 )
 
 var scopeLabelKeys = []string{"namespace", "pod", "instance", "job", "service", "node", "component"}
+var grafanaValueStringRefPattern = regexp.MustCompile(`var='([^']+)'\s+labels=\{[^}]*\}\s+value=([^,\]\s]+)`)
 
 // GrafanaToDiscord transforms a Grafana webhook payload to Discord messages (one per alert)
 func GrafanaToDiscord(payload *grafana.WebhookPayload) []discord.Message {
@@ -35,7 +37,7 @@ func GrafanaToDiscord(payload *grafana.WebhookPayload) []discord.Message {
 
 		embed := discord.Embed{
 			Title:       getAlertTitle(alert),
-			Description: getAlertName(alert),
+			Description: buildDescription(alert),
 			Type:        "rich",
 			URL:         alertingURL,
 			Color:       getAlertColor(alert),
@@ -76,19 +78,18 @@ func getAlertColor(alert grafana.Alert) int {
 
 func getAlertTitle(alert grafana.Alert) string {
 	severity := alert.Labels["severity"]
-
-	if severity == "notification" || severity == "info" {
-		return "Notification"
+	if severity == "" {
+		severity = "warning"
 	}
 
-	if alert.Status == "firing" {
-		if severity == "critical" {
-			return "Critical monitor triggered"
-		}
-		return "Warning monitor triggered"
+	status := "Firing"
+	if alert.Status == "resolved" {
+		status = "Recovered"
+	} else if alert.Status != "firing" && alert.Status != "" {
+		status = titleCase(alert.Status)
 	}
 
-	return "Monitor recovered"
+	return fmt.Sprintf("%s %s: %s", status, strings.ToLower(severity), getAlertName(alert))
 }
 
 func getAlertName(alert grafana.Alert) string {
@@ -102,8 +103,8 @@ func getAlertName(alert grafana.Alert) string {
 func buildFields(alert grafana.Alert, externalURL string) []discord.EmbedField {
 	fields := []discord.EmbedField{
 		{
-			Name:   "Summary",
-			Value:  truncateFieldValue(buildSummary(alert)),
+			Name:   "Impact",
+			Value:  truncateFieldValue(buildImpact(alert)),
 			Inline: false,
 		},
 	}
@@ -118,22 +119,28 @@ func buildFields(alert grafana.Alert, externalURL string) []discord.EmbedField {
 
 	if values := buildObservedValue(alert); values != "" {
 		fields = append(fields, discord.EmbedField{
-			Name:   "Observed value",
+			Name:   "Value",
 			Value:  truncateFieldValue(values),
-			Inline: false,
+			Inline: true,
 		})
 	}
 
 	fields = append(fields, discord.EmbedField{
-		Name:   "Status",
-		Value:  buildStatus(alert),
+		Name:   "Timeline",
+		Value:  buildTimeline(alert),
 		Inline: true,
 	})
 
-	if actions := buildActions(alert, externalURL); actions != "" {
+	fields = append(fields, discord.EmbedField{
+		Name:   "Next step",
+		Value:  truncateFieldValue(buildNextStep(alert)),
+		Inline: false,
+	})
+
+	if links := buildLinks(alert, externalURL); links != "" {
 		fields = append(fields, discord.EmbedField{
-			Name:   "Actions",
-			Value:  truncateFieldValue(actions),
+			Name:   "Links",
+			Value:  truncateFieldValue(links),
 			Inline: false,
 		})
 	}
@@ -141,21 +148,23 @@ func buildFields(alert grafana.Alert, externalURL string) []discord.EmbedField {
 	return fields
 }
 
-func buildSummary(alert grafana.Alert) string {
-	var lines []string
-
+func buildDescription(alert grafana.Alert) string {
 	if summary := strings.TrimSpace(alert.Annotations["summary"]); summary != "" {
-		lines = append(lines, summary)
+		return truncateFieldValue(summary)
 	}
+
+	return getAlertName(alert)
+}
+
+func buildImpact(alert grafana.Alert) string {
 	if description := strings.TrimSpace(alert.Annotations["description"]); description != "" {
-		lines = append(lines, description)
+		return description
+	}
+	if summary := strings.TrimSpace(alert.Annotations["summary"]); summary != "" {
+		return summary
 	}
 
-	if len(lines) == 0 {
-		return "No summary provided."
-	}
-
-	return strings.Join(lines, "\n")
+	return "No impact description provided."
 }
 
 func buildScope(alert grafana.Alert) string {
@@ -175,10 +184,20 @@ func buildObservedValue(alert grafana.Alert) string {
 		return formatFloat(value)
 	}
 
-	return parseObservedValueAnnotation(alert.Annotations["values"])
+	if value := parseObservedValueAnnotation(alert.Annotations["values"]); value != "" {
+		return value
+	}
+
+	return parseObservedValueAnnotation(alert.ValueString)
 }
 
 func parseObservedValueAnnotation(value string) string {
+	for _, match := range grafanaValueStringRefPattern.FindAllStringSubmatch(value, -1) {
+		if len(match) == 3 && match[1] == "B" {
+			return strings.TrimSpace(match[2])
+		}
+	}
+
 	for _, part := range strings.Split(value, ",") {
 		key, val, ok := strings.Cut(strings.TrimSpace(part), "=")
 		if !ok || strings.TrimSpace(key) != "B" {
@@ -195,15 +214,20 @@ func formatFloat(value float64) string {
 	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
-func buildStatus(alert grafana.Alert) string {
+func buildTimeline(alert grafana.Alert) string {
 	status := titleCase(alert.Status)
 	if status == "" {
 		status = "Unknown"
 	}
 
 	if ts := statusTime(alert); !ts.IsZero() {
+		var lines []string
 		if alert.Status == "resolved" {
-			return fmt.Sprintf("%s\nEnded: `%s`", status, ts.UTC().Format(time.RFC3339))
+			lines = append(lines, status, fmt.Sprintf("Ended: `%s`", ts.UTC().Format(time.RFC3339)))
+			if !alert.StartsAt.IsZero() && alert.EndsAt.After(alert.StartsAt) {
+				lines = append(lines, fmt.Sprintf("Duration: `%s`", alert.EndsAt.Sub(alert.StartsAt).Round(time.Second)))
+			}
+			return strings.Join(lines, "\n")
 		}
 
 		return fmt.Sprintf("%s\nStarted: `%s`", status, ts.UTC().Format(time.RFC3339))
@@ -212,7 +236,15 @@ func buildStatus(alert grafana.Alert) string {
 	return status
 }
 
-func buildActions(alert grafana.Alert, externalURL string) string {
+func buildNextStep(alert grafana.Alert) string {
+	if runbook := strings.TrimSpace(alert.Annotations["runbook"]); runbook != "" {
+		return runbook
+	}
+
+	return "Open the source link and inspect the affected scope."
+}
+
+func buildLinks(alert grafana.Alert, externalURL string) string {
 	var links []string
 
 	if alert.GeneratorURL != "" {
