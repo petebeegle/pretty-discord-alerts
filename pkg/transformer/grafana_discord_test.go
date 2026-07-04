@@ -40,10 +40,10 @@ func TestGrafanaToDiscord(t *testing.T) {
 				GeneratorURL: "https://monitoring.example.com/d/api",
 				StartsAt:     started,
 			},
-			wantTitle:     "Critical monitor triggered",
+			wantTitle:     "Firing critical: HighCPU",
 			wantColor:     colorFiring,
 			wantTimestamp: started.Format(time.RFC3339),
-			wantFields:    []string{"Summary", "Scope", "Observed value", "Status", "Actions"},
+			wantFields:    []string{"Impact", "Scope", "Value", "Timeline", "Next step", "Links"},
 		},
 		{
 			name: "warning firing alert",
@@ -59,10 +59,10 @@ func TestGrafanaToDiscord(t *testing.T) {
 				},
 				StartsAt: started,
 			},
-			wantTitle:     "Warning monitor triggered",
+			wantTitle:     "Firing warning: DiskPressure",
 			wantColor:     colorWarning,
 			wantTimestamp: started.Format(time.RFC3339),
-			wantFields:    []string{"Summary", "Scope", "Status", "Actions"},
+			wantFields:    []string{"Impact", "Scope", "Timeline", "Next step", "Links"},
 		},
 		{
 			name: "resolved alert uses recovery title and end timestamp",
@@ -78,10 +78,10 @@ func TestGrafanaToDiscord(t *testing.T) {
 				StartsAt: started,
 				EndsAt:   ended,
 			},
-			wantTitle:     "Monitor recovered",
+			wantTitle:     "Recovered critical: HighCPU",
 			wantColor:     colorResolved,
 			wantTimestamp: ended.Format(time.RFC3339),
-			wantFields:    []string{"Summary", "Status", "Actions"},
+			wantFields:    []string{"Impact", "Timeline", "Next step", "Links"},
 		},
 		{
 			name: "notification severity stays neutral",
@@ -96,10 +96,10 @@ func TestGrafanaToDiscord(t *testing.T) {
 				},
 				StartsAt: started,
 			},
-			wantTitle:     "Notification",
+			wantTitle:     "Firing notification: Player Login",
 			wantColor:     colorNotification,
 			wantTimestamp: started.Format(time.RFC3339),
-			wantFields:    []string{"Summary", "Status", "Actions"},
+			wantFields:    []string{"Impact", "Timeline", "Next step", "Links"},
 		},
 		{
 			name: "missing optional fields remains valid",
@@ -108,9 +108,9 @@ func TestGrafanaToDiscord(t *testing.T) {
 				Labels:      map[string]string{},
 				Annotations: map[string]string{},
 			},
-			wantTitle:  "Warning monitor triggered",
+			wantTitle:  "Firing warning: Grafana alert",
 			wantColor:  colorWarning,
-			wantFields: []string{"Summary", "Status", "Actions"},
+			wantFields: []string{"Impact", "Timeline", "Next step"},
 		},
 	}
 
@@ -137,6 +137,9 @@ func TestGrafanaToDiscord(t *testing.T) {
 			embed := msg.Embeds[0]
 			if embed.Title != tt.wantTitle {
 				t.Errorf("title = %q, want %q", embed.Title, tt.wantTitle)
+			}
+			if embed.Description == "" {
+				t.Error("description should not be empty")
 			}
 			if embed.Color != tt.wantColor {
 				t.Errorf("color = %d, want %d", embed.Color, tt.wantColor)
@@ -206,9 +209,9 @@ func TestBuildFieldsContent(t *testing.T) {
 
 	fields := buildFields(alert, "https://monitoring.example.com")
 
-	summary := fieldByName(fields, "Summary")
-	if summary == nil || !strings.Contains(summary.Value, "CPU saturation is high") || !strings.Contains(summary.Value, "api-0 has exceeded") {
-		t.Fatalf("summary field = %#v", summary)
+	impact := fieldByName(fields, "Impact")
+	if impact == nil || !strings.Contains(impact.Value, "api-0 has exceeded") || strings.Contains(impact.Value, "CPU saturation is high") {
+		t.Fatalf("impact field = %#v", impact)
 	}
 
 	scope := fieldByName(fields, "Scope")
@@ -216,22 +219,27 @@ func TestBuildFieldsContent(t *testing.T) {
 		t.Fatalf("scope field = %#v", scope)
 	}
 
-	observed := fieldByName(fields, "Observed value")
+	observed := fieldByName(fields, "Value")
 	if observed == nil || observed.Value != "91.2" {
-		t.Fatalf("observed value field = %#v", observed)
+		t.Fatalf("value field = %#v", observed)
 	}
 	if strings.Contains(observed.Value, "C=") || strings.Contains(observed.Value, "C") {
 		t.Fatalf("observed value should not include threshold condition ref C: %#v", observed)
 	}
 
-	status := fieldByName(fields, "Status")
-	if status == nil || !strings.Contains(status.Value, "Firing") || !strings.Contains(status.Value, started.Format(time.RFC3339)) {
-		t.Fatalf("status field = %#v", status)
+	timeline := fieldByName(fields, "Timeline")
+	if timeline == nil || !strings.Contains(timeline.Value, "Firing") || !strings.Contains(timeline.Value, started.Format(time.RFC3339)) {
+		t.Fatalf("timeline field = %#v", timeline)
 	}
 
-	actions := fieldByName(fields, "Actions")
-	if actions == nil || !strings.Contains(actions.Value, "[Source]") || !strings.Contains(actions.Value, "[Silence]") {
-		t.Fatalf("actions field = %#v", actions)
+	nextStep := fieldByName(fields, "Next step")
+	if nextStep == nil || nextStep.Value != "Open the source link and inspect the affected scope." {
+		t.Fatalf("next step field = %#v", nextStep)
+	}
+
+	links := fieldByName(fields, "Links")
+	if links == nil || !strings.Contains(links.Value, "[Source]") || !strings.Contains(links.Value, "[Silence]") {
+		t.Fatalf("links field = %#v", links)
 	}
 }
 
@@ -242,17 +250,17 @@ func TestBuildFieldsOmitMissingOptionalFields(t *testing.T) {
 		Annotations: map[string]string{},
 	}, "")
 
-	if fieldByName(fields, "Summary") == nil {
-		t.Fatal("missing summary field")
+	if fieldByName(fields, "Impact") == nil {
+		t.Fatal("missing impact field")
 	}
 	if fieldByName(fields, "Scope") != nil {
 		t.Fatal("scope field should be omitted")
 	}
-	if fieldByName(fields, "Observed value") != nil {
-		t.Fatal("observed value field should be omitted")
+	if fieldByName(fields, "Value") != nil {
+		t.Fatal("value field should be omitted")
 	}
-	if fieldByName(fields, "Actions") != nil {
-		t.Fatal("actions field should be omitted")
+	if fieldByName(fields, "Links") != nil {
+		t.Fatal("links field should be omitted")
 	}
 }
 
@@ -268,9 +276,23 @@ func TestBuildObservedValueFromAnnotationFallback(t *testing.T) {
 		},
 	}, "")
 
-	observed := fieldByName(fields, "Observed value")
+	observed := fieldByName(fields, "Value")
 	if observed == nil || observed.Value != "91.2" {
-		t.Fatalf("observed value field = %#v", observed)
+		t.Fatalf("value field = %#v", observed)
+	}
+}
+
+func TestBuildObservedValueFromGrafanaValueString(t *testing.T) {
+	fields := buildFields(grafana.Alert{
+		Status:      "resolved",
+		Labels:      map[string]string{"severity": "warning"},
+		Annotations: map[string]string{"summary": "Flux resource readiness is unknown"},
+		ValueString: "[ var='B' labels={} value=0 ], [ var='C' labels={} value=0 ]",
+	}, "")
+
+	observed := fieldByName(fields, "Value")
+	if observed == nil || observed.Value != "0" {
+		t.Fatalf("value field = %#v", observed)
 	}
 }
 
@@ -301,10 +323,76 @@ func TestBuildObservedValueOmitsConditionOnlyValues(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fields := buildFields(tt.alert, "")
-			if fieldByName(fields, "Observed value") != nil {
-				t.Fatalf("observed value field should be omitted: %#v", fields)
+			if fieldByName(fields, "Value") != nil {
+				t.Fatalf("value field should be omitted: %#v", fields)
 			}
 		})
+	}
+}
+
+func TestBuildNextStepUsesRunbook(t *testing.T) {
+	fields := buildFields(grafana.Alert{
+		Status: "firing",
+		Labels: map[string]string{
+			"severity": "warning",
+		},
+		Annotations: map[string]string{
+			"summary": "Discord alert delivery is failing",
+			"runbook": "docs/runbooks/discord-alert-delivery-health.md",
+		},
+	}, "")
+
+	nextStep := fieldByName(fields, "Next step")
+	if nextStep == nil || nextStep.Value != "docs/runbooks/discord-alert-delivery-health.md" {
+		t.Fatalf("next step field = %#v", nextStep)
+	}
+}
+
+func TestFluxResolvedTriageCard(t *testing.T) {
+	started := time.Date(2026, 7, 4, 12, 50, 0, 0, time.UTC)
+	ended := time.Date(2026, 7, 4, 12, 55, 20, 0, time.UTC)
+	msgs := GrafanaToDiscord(&grafana.WebhookPayload{
+		Status:      "resolved",
+		ExternalURL: "https://grafana.example.com",
+		Alerts: []grafana.Alert{
+			{
+				Status: "resolved",
+				Labels: map[string]string{
+					"alertname": "Flux Resources Readiness Unknown",
+					"component": "flux",
+					"severity":  "warning",
+				},
+				Annotations: map[string]string{
+					"summary":     "Flux resource readiness is unknown",
+					"description": "Flux resource readiness is unknown [ var='B' labels={} value=0 ], [ var='C' labels={} value=0 ] Flux resource(s) report unknown readiness and may not be reconciling cleanly",
+					"runbook":     "Start with: flux get all -A; kubectl describe kustomization -n <namespace> <name>; kubectl describe helmrelease -n <namespace> <name>",
+				},
+				ValueString:  "[ var='B' labels={} value=0 ], [ var='C' labels={} value=0 ]",
+				GeneratorURL: "https://grafana.example.com/alerting/grafana/source",
+				StartsAt:     started,
+				EndsAt:       ended,
+			},
+		},
+	})
+
+	embed := msgs[0].Embeds[0]
+	if embed.Title != "Recovered warning: Flux Resources Readiness Unknown" {
+		t.Fatalf("title = %q", embed.Title)
+	}
+	if embed.Description != "Flux resource readiness is unknown" {
+		t.Fatalf("description = %q", embed.Description)
+	}
+	value := fieldByName(embed.Fields, "Value")
+	if value == nil || value.Value != "0" {
+		t.Fatalf("value field = %#v", value)
+	}
+	timeline := fieldByName(embed.Fields, "Timeline")
+	if timeline == nil || !strings.Contains(timeline.Value, "Duration: `5m20s`") {
+		t.Fatalf("timeline field = %#v", timeline)
+	}
+	nextStep := fieldByName(embed.Fields, "Next step")
+	if nextStep == nil || !strings.Contains(nextStep.Value, "flux get all -A") {
+		t.Fatalf("next step field = %#v", nextStep)
 	}
 }
 

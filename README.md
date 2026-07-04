@@ -132,14 +132,15 @@ The service sends **one Discord message per alert** with:
 
 - **Username**: "Grafana"
 - **Embed**:
-  - **Title**: Datadog-inspired monitor status (`Critical monitor triggered`, `Warning monitor triggered`, `Monitor recovered`, or `Notification`)
-  - **Description**: Alert name from the `alertname` label
+  - **Title**: Triage-first status, severity, and alert name, such as `Firing critical: HighCPU` or `Recovered warning: Flux Resources Readiness Unknown`
+  - **Description**: Concise alert summary from the `summary` annotation, falling back to the `alertname` label
   - **Fields**:
-    - `Summary` with summary and description annotations
+    - `Impact` with the detailed description annotation, falling back to summary text
     - `Scope` with namespace, pod, instance, job, service, node, and component labels when present
-    - `Observed value` from Grafana evaluation ref `B` when present
-    - `Status` with firing/resolved state and start/end time when present
-    - `Actions` with Source and Silence links
+    - `Value` from Grafana evaluation ref `B` when present, including Grafana `valueString` payloads
+    - `Timeline` with firing/resolved state, start/end time, and recovery duration when available
+    - `Next step` with the runbook annotation, or a source-inspection fallback
+    - `Links` with Source and Silence links
   - **Color**: Red for critical, orange/yellow for warning, green for resolved, neutral gray-blue for notification/info
   - **Type**: "rich"
   - **URL**: Link to Grafana alerting list
@@ -152,27 +153,32 @@ For a critical firing alert, each Discord message will look like:
 
 **Username:** Grafana
 
-**Embed Title:** Critical monitor triggered
+**Embed Title:** Firing critical: TestAlert
 
-**Description:** TestAlert
+**Description:** Notification test
 
-**Summary**
+**Impact**
 ```
-Notification test
+The test service exceeded the alert threshold.
 ```
 
-**Observed value**
+**Value**
 ```
 22
 ```
 
-**Status**
+**Timeline**
 ```
 Firing
 Started: 2026-02-02T12:00:00Z
 ```
 
-**Actions**
+**Next step**
+```
+Start with: kubectl get pods -A
+```
+
+**Links**
 ```
 [Source](https://...) • [Silence](https://...)
 ```
@@ -181,7 +187,7 @@ Started: 2026-02-02T12:00:00Z
 
 > **Note**: 
 > - Each alert in the Grafana payload creates a separate Discord message
-> - "Observed value" shows Grafana evaluation ref `B` when present and omits threshold condition ref `C`
+> - `Value` shows Grafana evaluation ref `B` when present and omits threshold condition ref `C`
 
 ## Health Checks
 
